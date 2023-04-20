@@ -1,0 +1,71 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <string.h>
+
+#define MAX_CHILDREN 5
+#define BUFFER_SIZE 256
+
+int child_pids[MAX_CHILDREN];
+int num_children = 0;
+int parent_to_child_pipe[2];
+
+void handle_interrupt(int sig) {
+    printf("\nInterrupt received. Exiting...\n");
+    for (int i = 0; i < num_children; i++) {
+        kill(child_pids[i], SIGTERM);
+    }
+    exit(0);
+}
+
+void create_child() {
+    if (num_children >= MAX_CHILDREN) {
+        printf("Maximum number of children reached.\n");
+        return;
+    }
+
+    int pid;
+    if ((pid = fork()) == 0) {
+        // Child process
+        close(parent_to_child_pipe[1]);  // Close write end of the pipe
+
+        char buffer[BUFFER_SIZE];
+        int bytes_read;
+        while ((bytes_read = read(parent_to_child_pipe[0], buffer, BUFFER_SIZE)) > 0) {
+            buffer[bytes_read] = '\0';  // Null-terminate the string
+            printf("Child received message: %s", buffer);
+        }
+
+        close(parent_to_child_pipe[0]);  // Close read end of the pipe
+        exit(0);
+    } else if (pid > 0) {
+        // Parent process
+        child_pids[num_children++] = pid;
+    } else {
+        printf("Failed to fork.\n");
+    }
+}
+
+int main() {
+    if (pipe(parent_to_child_pipe) == -1) {
+        printf("Failed to create pipe.\n");
+        exit(1);
+    }
+
+    signal(SIGINT, handle_interrupt);  // Set up interrupt signal handler
+
+    printf("Parent process is running (PID: %d).\n", getpid());
+    printf("Enter a message to send to child processes (Ctrl + C to exit):\n");
+
+    while (1) {
+        char buffer[BUFFER_SIZE];
+        fgets(buffer, BUFFER_SIZE, stdin);  // Read message from user
+
+        for (int i = 0; i < num_children; i++) {
+            write(parent_to_child_pipe[1], buffer, strlen(buffer));  // Write message to pipe
+        }
+    }
+
+    return 0;
+}
